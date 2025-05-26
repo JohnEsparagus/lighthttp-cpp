@@ -1,4 +1,6 @@
 #include <iostream>
+#include <format>
+#include <sstream>
 #include <string>
 #include <cstring>
 #include <cstdlib>
@@ -7,9 +9,10 @@
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-
+#include <string>
+#define BUFFER_SIZE 1000
 void fail(const std::string &msg) {
-    std::cerr << "Error: " << msg << std::endl;
+    std::cerr << "ERROR: " << msg << std::endl;
     std::exit(EXIT_FAILURE);
 }
 
@@ -46,18 +49,51 @@ int main() {
         sockaddr_in client {};
         socklen_t client_len = sizeof(client);
 
+	char buffer[BUFFER_SIZE];
         int client_fd = accept(sockfd, reinterpret_cast<sockaddr*>(&client), &client_len);
         if (client_fd < 0) {
             std::cerr << "[!] Failed to accept connection\n";
             continue;
-        }
+        } else {
+	    ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer),0);
+	    if (bytes_read >= 0) {
+	        buffer[bytes_read] = '\0';
+	        std::cout << "Client send:\n" << buffer << std::endl;
+	    } else {
+	        fail("Error occured, bytes read was -1...");
+	    }
+            std::cout << "[*] New connection received\n";
+	}
+	std::string string_recieved(buffer);
 
-        std::cout << "[*] New connection received\n";
+	std::istringstream stream(string_recieved);
+	std::string word;
+	std::string empty_path = "/";
+	stream >> word;          
+        if (stream >> word) {        
+            std::cout << "Second word: " << word << std::endl;
+	}
+        else {
+            std::cout << "No second word found." << std::endl;
+	}
+	// we extract the 2nd word cause the average request is like
+	// GET /echo/abc HTTP/1.1\r\nHost: localhost:4221\r\nUser-Agent: curl/7.64.1....
+	// so we can extract /echo/abc and then do wbat is necessary
+	
+	if (empty_path==word) {
+            const std::string response = "HTTP/1.1 200 OK\r\n\r\n";
+            send(client_fd, response.c_str(), response.size(), 0);
+	} else if (word.substr(0,6)=="/echo/") {
+            std::string sub = word.substr(5);
+	    size_t response_size = sub.size();
+	    const std::string response = std::format("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}", response_size, sub);
 
-        const std::string response = "HTTP/1.1 200 OK\r\n\r\n";
-        send(client_fd, response.c_str(), response.size(), 0);
-
-        close(client_fd);
+            send(client_fd, response.c_str(), response.size(), 0);
+	} else {
+	    const std::string response = "HTTP/1.1 404 Not Found\r\n\r\n";
+            send(client_fd, response.c_str(), response.size(), 0);
+	}
+	close(client_fd);
     }
 
     close(sockfd);
