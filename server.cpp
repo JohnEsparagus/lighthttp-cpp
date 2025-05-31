@@ -16,36 +16,77 @@ void fail(const std::string &msg) {
     std::cerr << "ERROR: " << msg << std::endl;
     std::exit(EXIT_FAILURE);
 }
-void extractUrl(char buffer[],int client_fd) {
-        std::string string_recieved(buffer);
 
-        std::istringstream stream(string_recieved);
-        std::string word;
+std::string extractUserAgent(std::istringstream& stream) {
+    std::string line;
+    
+    while(std::getline(stream,line)) {
+        if (!line.empty() && line.back() == '\r') {
+	    line.pop_back();
+	}
+	if (line.empty()) break;
+
+	const std::string header = "User-Agent:";
+	if (line.compare(0, header.size(), header)==0) {
+	    std::string userAgent = line.substr(header.size());
+	    
+	    std::string::size_type begin = userAgent.find_first_not_of("\t");
+	    std::string::size_type end   = userAgent.find_last_not_of("\t");
+	    std::string trimmed = userAgent.substr(begin, end-begin + 1);
+
+	    return userAgent;
+	}
+    }
+    return "";
+}
+
+std::string extractUrlHeader(std::istringstream& stream){
+        std::string method;
         std::string empty_path = "/";
-        stream >> word;
-        if (stream >> word) {
-            std::cout << "Second word: " << word << std::endl;
-        }
-        else {
-            std::cout << "No second word found." << std::endl;
-        }
+	std::string path;
+
+	if (stream >> method) {
+            if (stream >> path) {
+                std::cout << "Extracte Path: " << path << std::endl;
+		return path;
+            }
+	}
+        std::cout << "No second word found." << std::endl;
+	return empty_path;
+
         // we extract the 2nd word cause the average request is like
         // GET /echo/abc HTTP/1.1\r\nHost: localhost:4221\r\nUser-Agent: curl/7.64.1....
         // so we can extract /echo/abc and then do wbat is necessary
 
-        if (empty_path==word) {
+}
+
+void extractUrl(char buffer[],int client_fd) {
+        std::string string_recieved(buffer);
+        std::istringstream stream(string_recieved);
+        std::string empty_path = "/";	
+	std::string path = extractUrlHeader(stream);
+		
+        if (empty_path==path) {
             const std::string response = "HTTP/1.1 200 OK\r\n\r\n";
             send(client_fd, response.c_str(), response.size(), 0);
-        } else if (word.substr(0,6)=="/echo/") {
-            std::string sub = word.substr(5);
+        } else if (path.substr(0,6)=="/echo/") {
+            std::string sub = path.substr(5);
             size_t response_size = sub.size();
             const std::string response = std::format("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}", response_size, sub);
 
             send(client_fd, response.c_str(), response.size(), 0);
-        } else {
+        } else if (path.substr(0,11) == "/user-agent") {
+            std::string userAgent = extractUserAgent(stream);
+	    size_t response_size = userAgent.size();
+	    const std::string response = std::format("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}", response_size, userAgent);
+	
+            send(client_fd, response.c_str(), response.size(), 0);
+	}
+	else {
             const std::string response = "HTTP/1.1 404 Not Found\r\n\r\n";
             send(client_fd, response.c_str(), response.size(), 0);
         }
+
 }
 
 int main() {
